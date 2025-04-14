@@ -314,7 +314,6 @@ class CPPModel:
                 name_len = struct.unpack('I', f.read(4))[0]
                 name = f.read(name_len).decode('utf-8')
                 
-                print(name)
                 # Parse pattern from name (e.g., "4-tuple pattern 0123")
                 pattern = [int(c, 16) for c in name.split()[-1]]
                 
