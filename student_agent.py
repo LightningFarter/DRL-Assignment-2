@@ -9,7 +9,6 @@ import copy
 import random
 import math
 import struct
-
 from collections import defaultdict
 
 
@@ -257,13 +256,13 @@ class Game2048Env(gym.Env):
 ########################################################################
 
 class Pattern:
-    def __init__(self, pattern, iso=8):
+    def __init__(self, pattern: list, iso=8):
         self.pattern = pattern
         self.iso = iso
         self.weights = None
         self.isom = self._create_isomorphic_patterns()
 
-    def _create_isomorphic_patterns(self):
+    def _create_isomorphic_patterns(self) -> list:
         isom = []
         for i in range(self.iso):
             idx = self._rotate_mirror_pattern([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], i)
@@ -271,24 +270,24 @@ class Pattern:
             isom.append(patt)
         return isom
 
-    def _rotate_mirror_pattern(self, base, rot):
+    def _rotate_mirror_pattern(self, base: list, rot: int) -> list:
         board = np.array(base, dtype=int).reshape(4,4)
         if rot >= 4:
             board = np.fliplr(board)
         board = np.rot90(board, rot % 4)
         return board.flatten().tolist()
 
-    def load_weights(self, weights):
+    def load_weights(self, weights: list):
         self.weights = weights
 
-    def estimate(self, board):
+    def estimate(self, board: np.ndarray) -> float:
         total = 0.0
         for iso in self.isom:
             index = self._get_index(iso, board)
             total += self.weights[index]
         return total
 
-    def _get_index(self, pattern, board):
+    def _get_index(self, pattern: list, board: np.ndarray) -> int:
         index = 0
         for i, pos in enumerate(pattern):
             tile = board[pos//4][pos%4]
@@ -301,11 +300,11 @@ class Pattern:
 
 
 class CPPModel:
-    def __init__(self, bin_path):
+    def __init__(self, bin_path: str):
         self.patterns = []
         self._load_binary(bin_path)
 
-    def _load_binary(self, path):
+    def _load_binary(self, path: str):
         with open(path, 'rb') as f:
             num_features = struct.unpack('Q', f.read(8))[0]
             
@@ -324,49 +323,134 @@ class CPPModel:
                 p.load_weights(weights)
                 self.patterns.append(p)
 
-    def estimate(self, board):
+    def estimate(self, board: np.ndarray) -> float:
         return sum(p.estimate(board) for p in self.patterns)
 
 
-class Node:
+class MCTSNode:
+    """Node for Monte Carlo Tree Search"""
     def __init__(self, action=None, parent=None):
         self.action = action
         self.parent = parent
         self.children = []
         self.visits = 0
         self.value = 0.0
-
-def select_child(node: Node) -> Node:
-    if not node.children:
-        return None
     
-    unvisited = [c for c in node.children if c.visits == 0]
-    if unvisited:
-        return random.choice(unvisited)
-
-    C = 1.0
-    best_score = -float('inf')
-    best_child = None
-    for child in node.children:
-        if child.visits > 0:
-            ucb = (child.value / child.visits) + C * math.sqrt(math.log(node.visits) / child.visits)
-            if ucb > best_score:
-                best_score = ucb
-                best_child = child
-    return best_child
+    @property
+    def ucb_score(self) -> float:
+        """Calculate UCB1 score for node selection"""
+        if self.visits == 0:
+            return float('inf')
+        return (self.value / self.visits) + 1.0 * math.sqrt(math.log(self.parent.visits) / self.visits)
 
 
-def board_to_cpp_format(py_board):
-    """Convert Python board (2D array) to C++ style 64-bit integer"""
-    cpp_board = 0
-    for i in range(4):
-        row = 0
-        for j in range(4):
-            tile = py_board[i][j]
-            val = 0 if tile == 0 else int(np.log2(tile))
-            row |= (val & 0xF) << (j * 4)
-        cpp_board |= row << (i * 16)
-    return cpp_board
+class MCTS:
+    """Monte Carlo Tree Search with depth 2 expetimax evaluation"""
+    def __init__(self, model: CPPModel, exploration_weight=1.0):
+        self.model = model
+        self.exploration_weight = exploration_weight
+    
+    def search(self, env: Game2048Env, iterations=100, depth=2) -> int:
+        """Perform MCTS search from current game state"""
+        root = MCTSNode()
+        legal_actions = [a for a in range(4) if env.is_move_legal(a)]
+
+        for action in legal_actions:
+            root.children.append(MCTSNode(action=action, parent=root))
+        
+        for _ in range(iterations):
+            node = self._select(root)
+            if depth == 1:
+                value = self._simulate_depth1(copy.deepcopy(env), node)
+            else:
+                value = self._simulate_depth2(copy.deepcopy(env), node)
+            self._backpropagate(node, value)
+        
+        return max(root.children, key=lambda c: c.value).action
+    
+    def _select(self, node: MCTSNode) -> MCTSNode:
+        """Selection phase: Choose child nodes using UCB until leaf node found"""
+        while node.children:
+            unvisited = [c for c in node.children if c.visits == 0]
+            if unvisited:
+                return random.choice(unvisited)
+            node = max(node.children, key=lambda c: c.ucb_score)
+        return node
+
+    def _simulate_depth2(self, env: Game2048Env, node: MCTSNode) -> float:
+        """Simulation phase: Perform depth 2 expectimax evaluation"""
+        original_score = env.score
+        moved = self._execute_action(env, node.action)
+
+        if not moved:
+            return -float('inf')
+
+        empty_cells = list(zip(*np.where(env.board == 0)))
+        expected_value = 0.0
+
+        if not empty_cells:
+            return self._evaluate_terminal(env, original_score)
+        
+        for (x, y) in empty_cells:
+            cell_prob = 1.0 / len(empty_cells)
+            for tile_value, prob in [(2, 0.9), (4, 0.1)]:
+                temp_env = copy.deepcopy(env)
+                temp_env.board[x, y] = tile_value
+
+                if temp_env.is_game_over():
+                    contribution = -50000
+                else:
+                    contribution = self.model.estimate(temp_env.board) + (temp_env.score - original_score)
+                
+                expected_value += cell_prob * prob * contribution
+        
+        return expected_value
+
+    def _simulate_depth1(self, env: Game2048Env, node: MCTSNode) -> float:
+        """Simulation for depth 1: Only evaluate immediate move"""
+        original_score = env.score
+        moved = self._execute_action(env, node.action)
+
+        if not moved:
+            return -float('inf')
+        
+        return self.model.estimate(env.board) + (env.score - original_score)
+
+    def _evaluate_terminal(self, env: Game2048Env, original_score: float) -> float:
+        """Handle terminal state evaluation"""
+        if env.is_game_over():
+            return -50000
+        return self.model.estimate(env.board) + (env.score - original_score)
+
+    def _execute_action(self, env: Game2048Env, action: int) -> bool:
+        """Execute an action on the environment"""
+        action_map = {
+            0: env.move_up,
+            1: env.move_down,
+            2: env.move_left,
+            3: env.move_right
+        }
+        return action_map[action]()
+
+    def _backpropagate(self, node: MCTSNode, value: float):
+        """Backpropagation phase: Update node statistics"""
+        while node is not None:
+            node.visits += 1
+            node.value += value
+            node = node.parent
+
+
+# def board_to_cpp_format(py_board):
+#     """Convert Python board (2D array) to C++ style 64-bit integer"""
+#     cpp_board = 0
+#     for i in range(4):
+#         row = 0
+#         for j in range(4):
+#             tile = py_board[i][j]
+#             val = 0 if tile == 0 else int(np.log2(tile))
+#             row |= (val & 0xF) << (j * 4)
+#         cpp_board |= row << (i * 16)
+#     return cpp_board
 
 # Initialize model (load once at startup)
 model = CPPModel('2048.bin')
@@ -389,52 +473,9 @@ def get_action(state, score):
     env.board = np.array(state)
     env.score = score
     
-    legal_moves = [a for a in range(4) if env.is_move_legal(a)]
-    
-    if not legal_moves:
-        return 0  # Should never happen
-    
-    root = Node() # MCTS root
-    
-    for action in legal_moves:
-        child = Node(action=action, parent=root)
-        root.children.append(child)
-    
-    num_iterations = len(legal_moves)
-    for _ in range(num_iterations):
-        child = select_child(root)
-
-        temp_env = copy.deepcopy(env)
-
-        # shallow rollout
-        if child.action == 0:
-            temp_env.move_up()
-        elif child.action == 1:
-            temp_env.move_down()
-        elif child.action == 2:
-            temp_env.move_left()
-        elif child.action == 3:
-            temp_env.move_right()
-        
-        # heuristic with n-tuple estimator
-        estimated_value = model.estimate(temp_env.board) + temp_env.score - score
-
-        # simulate tiles filling
-        empty_cells = list(zip(*np.where(temp_env.board == 0)))
-        if empty_cells:
-            x, y = random.choice(empty_cells)
-            tile_value = 2 if random.random() < 0.9 else 4
-            temp_env.board[x, y] = tile_value
-
-        if temp_env.is_game_over():
-            estimated_value = -50000
-
-        child.value += estimated_value
-        child.visits += 1
-        root.visits += 1
-    
-    best_child = max(root.children, key=lambda c: c.value)
-    return best_child.action
+    mcts = MCTS(model=model)
+    best_action = mcts.search(env, iterations=4, depth=1)
+    return best_action
 
 
 ### simple TD trail for testing
