@@ -315,7 +315,7 @@ class CPPModel:
                 name = f.read(name_len).decode('utf-8')
                 
                 # Parse pattern from name (e.g., "4-tuple pattern 0123")
-                pattern = [int(c, 16) for c in name.split()[-1]]
+                pattern = [int(c, 16) for c in name.split()[-1] if c.isalnum()]
                 
                 # Create pattern and load weights
                 p = Pattern(pattern)
