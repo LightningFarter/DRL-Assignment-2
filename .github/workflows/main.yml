@@ -24,7 +24,7 @@ jobs:
 
     - name: Download files from Google Drive
       run: |
-        curl -L -o 2048.bin "https://drive.google.com/uc?id=1hW0hBhONs-XPwXiX8sgK75lJYK_51rL6&export=download"
+        curl -L -o 2048.bin "https://drive.usercontent.google.com/download?id=1hW0hBhONs-XPwXiX8sgK75lJYK_51rL6&export=download&confirm=t"
 
     - name: 1. Creating virtual env
       uses: actions/setup-python@v4
