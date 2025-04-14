@@ -24,7 +24,7 @@ jobs:
 
     - name: Download files from Google Drive
       run: |
-        gdown https://drive.google.com/file/d/1hW0hBhONs-XPwXiX8sgK75lJYK_51rL6/view?usp=sharing -O 2048.bin
+        gdown --fuzzy https://drive.google.com/file/d/1hW0hBhONs-XPwXiX8sgK75lJYK_51rL6 -O 2048.bin
 
     - name: 1. Creating virtual env
       uses: actions/setup-python@v4
