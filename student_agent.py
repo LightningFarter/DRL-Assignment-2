@@ -10,6 +10,7 @@ import random
 import math
 import struct
 from collections import defaultdict
+import pygame
 
 
 COLOR_MAP = {
@@ -26,7 +27,7 @@ TEXT_COLOR = {
 
 
 class Game2048Env(gym.Env):
-    def __init__(self):
+    def __init__(self, window_size=(800,800)):
         super(Game2048Env, self).__init__()
 
         self.size = 4  # 4x4 2048 board
@@ -38,6 +39,12 @@ class Game2048Env(gym.Env):
         self.actions = ["up", "down", "left", "right"]
 
         self.last_move_valid = True  # Record if the last move was valid
+
+        self.window_size = window_size
+        self.cell_size = window_size[0] // self.size
+
+        pygame.font.init()
+        self.font = pygame.font.SysFont('arial', self.cell_size // 4, bold=True)
 
         self.reset()
 
@@ -203,6 +210,42 @@ class Game2048Env(gym.Env):
             plt.close()
         else:
             plt.show()
+    
+    def pygame_render(self, surface, action=None):
+        """
+        Draw the current board state into the given Pygame surface.
+        surface: a pygame.Surface of size self.window_size
+        """
+        # fill background
+        surface.fill(pygame.Color("#bbada0"))
+
+        for i in range(self.size):
+            for j in range(self.size):
+                val = self.board[i, j]
+                # tile rectangle
+                rect = pygame.Rect(
+                    j * self.cell_size + 5,
+                    i * self.cell_size + 5,
+                    self.cell_size - 10,
+                    self.cell_size - 10
+                )
+                pygame.draw.rect(surface, pygame.Color(COLOR_MAP.get(val, "#3c3a32")), rect, border_radius=5)
+
+                if val != 0:
+                    txt_surf = self.font.render(str(val), True,
+                                                pygame.Color(TEXT_COLOR.get(val, "#f9f6f2")))
+                    txt_rect = txt_surf.get_rect(center=rect.center)
+                    surface.blit(txt_surf, txt_rect)
+
+        # Optional status bar at bottom
+        info = f"Score: {self.score}"
+        if action is not None:
+            info += f"  Move: {self.actions[action]}"
+        info_surf = self.font.render(info, True, pygame.Color("#776e65"))
+        surface.blit(info_surf, (10, self.window_size[1] - self.cell_size // 2))
+
+        # finally flip/update
+        pygame.display.flip()
 
     def simulate_row_move(self, row):
         """Simulate a left move for a single row"""
@@ -249,6 +292,22 @@ class Game2048Env(gym.Env):
 
         # If the simulated board is different from the current board, the move is legal
         return not np.array_equal(self.board, temp_board)
+
+    def __getstate__(self):
+        """Customize what gets pickled for deepcopy"""
+        state = self.__dict__.copy()
+        # Remove non-pickleable objects
+        if 'font' in state:
+            del state['font']
+        return state
+
+    def __setstate__(self, state):
+        """Restore state after unpickling"""
+        self.__dict__.update(state)
+        # Recreate the font after unpickling if window size is available
+        if hasattr(self, 'window_size') and hasattr(self, 'size'):
+            cell_size = self.window_size[0] // self.size
+            self.font = pygame.font.SysFont('arial', cell_size // 4, bold=True)
 
 
 ########################################################################

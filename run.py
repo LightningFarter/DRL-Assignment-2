@@ -12,7 +12,7 @@ def run_episode(env, render=False, render_interval=50):
     
     while True:
         if render and (steps % render_interval == 0):
-            env.render(action=None, savepath=f"frame_{steps:04d}.png")
+            env.render(action=None, savepath=f"pics/frame_{steps:04d}.png")
         
         action = get_action(state, env.score)
         next_state, reward, done, _ = env.step(action)
@@ -22,11 +22,12 @@ def run_episode(env, render=False, render_interval=50):
         max_tile = max(max_tile, np.max(next_state))
         state = next_state
 
-        # if steps % 10 == 0:
-        #     print(state)
+        # if steps % 100 == 0:
+        #     # print(state)
         #     print(reward)
         
         if done:
+            env.render(action=None, savepath=f"pics/frame_{steps:04d}.png")
             break
             
     return env.score, max_tile, steps
@@ -73,7 +74,7 @@ def run_episode(env, render=False, render_interval=50):
 if __name__ == "__main__":
     # main()
     random.seed(0)
-    for i in range(10):
+    for i in range(1):
         env = Game2048Env()
         env.reset()
-        print(run_episode(env))
+        print(run_episode(env, render=True, render_interval=50))

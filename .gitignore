@@ -7,3 +7,12 @@ __pycache__/
 
 # ignore eval.py
 eval.py
+
+pics/*
+*.bin
+2048ex
+2048
+2048_320k
+*.gif
+*.png
+*.so
