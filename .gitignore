@@ -17,3 +17,6 @@ pics/*
 *.png
 *.so
 *.pdf
+
+# direnv
+.direnv/
